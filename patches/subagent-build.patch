@@ -1,0 +1,316 @@
+diff --git a/a/SKILL.md b/b/SKILL.md
+index 4519578..c0ffc15 100644
+--- a/a/SKILL.md
++++ b/b/SKILL.md
+@@ -1,9 +1,14 @@
+ ---
+-name: subagent-driven-development
+-description: Use when executing implementation plans with independent tasks in the current session
++name: subagent-build
++description: "Execute an agent-skills task list (tasks/todo.md) with a fresh implementer subagent per task, a review after each task, and a whole-branch review at the end. Use for /subagent-build, or when the user asks to build a large plan with subagents. Add \"auto\" to run past checkpoints without stopping."
++disable-model-invocation: true
+ ---
+ 
+-# Subagent-Driven Development
++# Subagent Build
++
++Adapted from `subagent-driven-development` in obra/superpowers (MIT) to run on
++the plan artifacts that addyosmani/agent-skills produces. The task loop is
++theirs, unchanged. [CHANGES.md](CHANGES.md) lists every difference.
+ 
+ Execute plan by dispatching a fresh implementer subagent per task, a task review (spec compliance + code quality) after each, and a broad whole-branch review at the end.
+ 
+@@ -14,7 +19,7 @@ Execute plan by dispatching a fresh implementer subagent per task, a task review
+ **Narration:** between tool calls, narrate at most one short line — the
+ ledger and the tool results carry the record.
+ 
+-**Continuous execution:** Do not pause to check in with your human partner between tasks. Execute all tasks from the plan without stopping. The only reasons to stop are the four named below, or all tasks complete. "Should I continue?" prompts and progress summaries waste their time — they asked you to execute the plan, so execute it.
++**Continuous execution:** Do not pause to check in with your human partner between tasks. Execute all tasks from the plan without stopping. The only reasons to stop are the four named below, a checkpoint (see Checkpoints), or all tasks complete. "Should I continue?" prompts and progress summaries waste their time — they asked you to execute the plan, so execute it.
+ 
+ **Rulings, not stalls.** A running plan does not wait on a human. Conflicts,
+ ambiguities, plan defects, a cap you would have asked to exceed — decide
+@@ -30,6 +35,45 @@ that norms say you ask about first (a merge, a push to a shared branch, a
+ publish); and a plan so broken that every path forward is a guess. For those,
+ stop and ask.
+ 
++## Inputs
++
++This skill runs on the files the agent-skills `/spec` and `/plan` commands
++write. Wherever this skill or its references say:
++
++- **PLAN_FILE** or "the plan": the task list at `tasks/todo.md`. Its
++  `## Task N:` blocks are the tasks. Also read `tasks/plan.md` once for the
++  architecture decisions and risks behind them; it is context, not a task
++  source.
++- **the Spec**: `SPEC.md` at the repo root, `docs/SPEC.md`, or a file under
++  `spec/`. If none exists, stop and tell your human partner to run `/spec`
++  first.
++- **Global Constraints**: `CONSTRAINTS.md` if the repo has one, plus the
++  Boundaries section of the spec. Copy the binding lines from those verbatim.
++
++If `tasks/todo.md` does not exist, stop and tell your human partner to run
++`/plan` first. If `tasks/plan.md` says the tasks live in an external tracker
++(Jira, Linear), stop and ask for them as a markdown task list: the scripts
++read a file.
++
++Run the tasks in the order the task list gives them. A task's
++**Dependencies** line names tasks that must be complete first; if the order
++violates one, that is a plan defect for the pre-flight scan.
++
++## Checkpoints
++
++The task list carries `## Checkpoint:` blocks between groups of tasks. When
++you reach one, run every check it lists and record the results in the ledger
++as `Checkpoint <name>: <result per check>`.
++
++- **Default:** stop there. Report the check results, the tasks completed
++  since the last checkpoint, and every `Ruling:` line added since then. Wait
++  for your human partner to say continue.
++- **`auto`** (the user invoked the skill with `auto` or `all`): do not stop
++  at a checkpoint whose checks pass. Stop only when a check fails and one fix
++  dispatch does not clear it.
++
++A checkpoint is not a task: never dispatch an implementer for one.
++
+ ## When to Use
+ 
+ ```dot
+@@ -78,7 +122,7 @@ digraph process {
+     "More tasks remain?" [shape=diamond];
+     "Final review and finish: read references/final-review.md" [shape=box];
+     "Final review clean: delete this plan's workspace" [shape=box];
+-    "Use superpowers:finishing-a-development-branch" [shape=box style=filled fillcolor=lightgreen];
++    "Hand off: /review, then /ship" [shape=box style=filled fillcolor=lightgreen];
+ 
+     "Setup: worktree, ledger check, read plan, pre-flight review" -> "Dispatch implementer subagent (./implementer-prompt.md)";
+     "Dispatch implementer subagent (./implementer-prompt.md)" -> "Implementer asks questions?";
+@@ -91,17 +135,18 @@ digraph process {
+     "Spec ✅ and quality approved?" -> "Fix loop: read references/fix-loop.md before every round" [label="no"];
+     "Fix loop: read references/fix-loop.md before every round" -> "Append completion to ledger, mark todo complete" [label="addressed, or parked at the cap"];
+     "Append completion to ledger, mark todo complete" -> "More tasks remain?";
+-    "More tasks remain?" -> "Dispatch implementer subagent (./implementer-prompt.md)" [label="yes"];
++    "More tasks remain?" -> "Checkpoint next? Run its checks; stop unless auto" [label="yes"];
++    "Checkpoint next? Run its checks; stop unless auto" -> "Dispatch implementer subagent (./implementer-prompt.md)";
+     "More tasks remain?" -> "Final review and finish: read references/final-review.md" [label="no"];
+     "Final review and finish: read references/final-review.md" -> "Final review clean: delete this plan's workspace";
+-    "Final review clean: delete this plan's workspace" -> "Use superpowers:finishing-a-development-branch";
++    "Final review clean: delete this plan's workspace" -> "Hand off: /review, then /ship";
+ }
+ ```
+ 
+ ## Setup
+ 
+-Ensure the work happens in an isolated workspace: use
+-superpowers:using-git-worktrees to create one or verify the existing one.
++Ensure the work happens in an isolated workspace: use the
++using-git-worktrees skill to create one or verify the existing one.
+ Never start implementation on a main/master branch without your human
+ partner's explicit consent.
+ 
+@@ -113,7 +158,7 @@ a ledger file, not only in todos.
+ - Each plan owns a workspace: at skill start, run this skill's
+   `bash scripts/sdd-workspace PLAN_FILE` by its absolute path, from the
+   working tree you're executing in — it prints the plan's git-ignored
+-  directory (under `<repo-root>/.superpowers/sdd/`), home to
++  directory (under `<repo-root>/.sdd/`), home to
+   every artifact for THIS plan: ledger, briefs, reports, review packages.
+   Another plan's directory is never yours to read or write.
+ - Check for this plan's ledger at `<workspace>/progress.md`. If one exists,
+@@ -314,7 +359,8 @@ message as your other bookkeeping:
+ - `Task <N>: complete (commits <base7>..<head7>, <K> parked)` after a
+   tripped breaker
+ 
+-Then mark the todo complete and move on. Never move to the next task while
++Then tick that task's checkboxes in `tasks/todo.md`, commit that edit on its
++own, mark the todo complete, and move on. Never move to the next task while
+ the review has open Critical/Important issues that are neither fixed nor
+ parked-with-ruling at the cap.
+ 
+diff --git a/a/references/batching.md b/b/references/batching.md
+index 6224e4b..1cf5295 100644
+--- a/a/references/batching.md
++++ b/b/references/batching.md
+@@ -1,6 +1,6 @@
+ # Batching Small Same-Shape Work
+ 
+-Part of superpowers:subagent-driven-development.
++Part of subagent-build.
+ 
+ **Batch small same-shape work.** When the plan lists several tasks that are
+ each a small, independent edit of the same kind — the same one-line fix,
+diff --git a/a/references/cannot-verify.md b/b/references/cannot-verify.md
+index e952f2d..37f97a6 100644
+--- a/a/references/cannot-verify.md
++++ b/b/references/cannot-verify.md
+@@ -1,6 +1,6 @@
+ # "Cannot Verify From Diff" Items
+ 
+-Part of superpowers:subagent-driven-development.
++Part of subagent-build.
+ 
+ The task reviewer may report "⚠️ Cannot verify from diff" items — requirements
+ that live in unchanged code or span tasks. These do not block the rest of the
+diff --git a/a/references/final-review.md b/b/references/final-review.md
+index cf03546..ddcb83b 100644
+--- a/a/references/final-review.md
++++ b/b/references/final-review.md
+@@ -1,6 +1,6 @@
+ # Final Review and Finish
+ 
+-Part of superpowers:subagent-driven-development. Every task in the plan is
++Part of subagent-build. Every task in the plan is
+ complete.
+ 
+ The final whole-branch review gets a package too: run
+@@ -10,8 +10,7 @@ branch started from, e.g. `git merge-base main HEAD`) and include the
+ printed path in the final review dispatch, so the final reviewer reads
+ one file instead of re-deriving the branch diff with git commands. Dispatch
+ on the most capable available model (see SKILL.md's Model Selection), using
+-superpowers:requesting-code-review's
+-[code-reviewer.md](../../requesting-code-review/code-reviewer.md). Point it at
++[final-reviewer-prompt.md](../final-reviewer-prompt.md). Point it at
+ the ledger's deferred-minor and parked lines so it can triage which must be
+ fixed before merge.
+ 
+@@ -27,8 +26,8 @@ Adjudicate any residual findings as in the fix loop's breaker
+ (references/fix-loop.md): park with rulings, or rule on the load-bearing
+ ones and ledger what you decided. Only the four things that stop a running
+ plan (top of SKILL.md) stop you here. There is no second fix wave —
+-residual load-bearing findings surface to your human partner when
+-finishing-a-development-branch presents the options.
++residual load-bearing findings surface to your human partner in your final
++message.
+ 
+ ### Finish
+ 
+@@ -46,4 +45,6 @@ delete this plan's workspace (`rm -rf <workspace>`) — the git history is
+ the record now. Sibling directories belong to other plans; leave them
+ alone.
+ 
+-Use superpowers:finishing-a-development-branch.
++Then stop. Do not merge, push, or open a pull request. Tell your human
++partner the branch is ready and that the next steps are the agent-skills
++`/review` and `/ship` commands.
+diff --git a/a/references/fix-loop.md b/b/references/fix-loop.md
+index 34e4a48..5769381 100644
+--- a/a/references/fix-loop.md
++++ b/b/references/fix-loop.md
+@@ -1,6 +1,6 @@
+ # The Fix Loop
+ 
+-Part of superpowers:subagent-driven-development. The task review reported
++Part of subagent-build. The task review reported
+ spec ❌, a Critical or Important finding, or a ⚠️ item you confirmed as a real
+ gap.
+ 
+diff --git a/a/references/handling-reports.md b/b/references/handling-reports.md
+index cf91cdc..84551b5 100644
+--- a/a/references/handling-reports.md
++++ b/b/references/handling-reports.md
+@@ -1,6 +1,6 @@
+ # Handling a Report That Isn't DONE
+ 
+-Part of superpowers:subagent-driven-development.
++Part of subagent-build.
+ 
+ **DONE_WITH_CONCERNS:** The implementer completed the work but flagged doubts. Read the concerns before proceeding. If the concerns are about correctness or scope, address them before review. If they're observations (e.g., "this file is getting large"), note them and proceed to review.
+ 
+diff --git a/a/references/preflight.md b/b/references/preflight.md
+index 1701648..cdcb153 100644
+--- a/a/references/preflight.md
++++ b/b/references/preflight.md
+@@ -1,6 +1,6 @@
+ # The Pre-flight Scan
+ 
+-Part of superpowers:subagent-driven-development. Run it once, before
++Part of subagent-build. Run it once, before
+ dispatching Task 1.
+ 
+ Before dispatching Task 1, scan the plan once for conflicts, writing down
+diff --git a/a/references/resuming.md b/b/references/resuming.md
+index 409b826..50c371b 100644
+--- a/a/references/resuming.md
++++ b/b/references/resuming.md
+@@ -1,6 +1,6 @@
+ # Resuming From an Existing Ledger
+ 
+-Part of superpowers:subagent-driven-development. This plan's workspace
++Part of subagent-build. This plan's workspace
+ already has a ledger at `<workspace>/progress.md`.
+ 
+ If the ledger's first line names your plan file, tasks with a `Task <N>:
+@@ -8,5 +8,5 @@ complete` line are DONE — do not re-dispatch them; resume at the first
+ task without one. A task whose last line is a fix round is mid-loop:
+ resume the loop at the next round. A ledger whose first line names a
+ different plan file — or a stray ledger at the old flat path
+-`.superpowers/sdd/progress.md` — is another plan's progress: leave it in
++`.sdd/progress.md` — is another plan's progress: leave it in
+ place and start your own, fresh.
+diff --git a/a/scripts/review-package b/b/scripts/review-package
+index 04c2b91..5b7a157 100755
+--- a/a/scripts/review-package
++++ b/b/scripts/review-package
+@@ -5,7 +5,7 @@
+ # tasks intact.
+ #
+ # Usage: review-package [-C DIR] PLAN_FILE BASE HEAD [OUTFILE]
+-# Default OUTFILE: <repo-root>/.superpowers/sdd/<plan-basename>/review-<base7>..<head7>.diff
++# Default OUTFILE: <repo-root>/.sdd/<plan-basename>/review-<base7>..<head7>.diff
+ # (named per range, so a re-review after fixes gets a distinct fresh file).
+ # The repository is the one sdd-repo names; -C DIR runs as if started in DIR,
+ # as in sdd-workspace.
+diff --git a/a/scripts/sdd-workspace b/b/scripts/sdd-workspace
+index ca3ac3b..addcd22 100755
+--- a/a/scripts/sdd-workspace
++++ b/b/scripts/sdd-workspace
+@@ -3,7 +3,7 @@
+ # short-lived artifacts: task briefs, implementer reports, review packages,
+ # and the progress ledger. Print the plan directory's absolute path.
+ #
+-# One directory per plan (.superpowers/sdd/<plan-basename>/) so a follow-up
++# One directory per plan (.sdd/<plan-basename>/) so a follow-up
+ # plan in the same working tree can never read or overwrite another plan's
+ # artifacts. A stale ledger misread as current progress makes controllers
+ # skip whole task sequences — plan-scoping removes that failure structurally.
+@@ -21,7 +21,7 @@
+ # The workspace lives in the working tree (not under .git/) because Claude Code
+ # treats .git/ as a protected path and denies agent writes there — which blocks
+ # an implementer subagent from writing its report file. A self-ignoring
+-# .gitignore at .superpowers/sdd/ keeps every plan's workspace out of
++# .gitignore at .sdd/ keeps every plan's workspace out of
+ # `git status` and out of accidental commits without modifying any tracked file.
+ #
+ # Single source of truth for the workspace location, so task-brief and
+@@ -62,7 +62,7 @@ slug=$(basename "$plan" .md)
+ # strip Unix exec bits when unpacking marketplace packages (#2040).
+ toplevel=$("${BASH:-bash}" "$here/sdd-repo")
+ root=$(CDPATH='' cd -- "$toplevel" && pwd -P)
+-base="$root/.superpowers/sdd"
++base="$root/.sdd"
+ 
+ # Normalize the plan path (physical directory, so relative/absolute/../
+ # spellings of one plan compare equal) and express it as the marker value:
+diff --git a/a/scripts/task-brief b/b/scripts/task-brief
+index a490211..8d06955 100755
+--- a/a/scripts/task-brief
++++ b/b/scripts/task-brief
+@@ -4,7 +4,7 @@
+ # through the controller's context.
+ #
+ # Usage: task-brief [-C DIR] PLAN_FILE TASK_NUMBER [OUTFILE]
+-# Default OUTFILE: <repo-root>/.superpowers/sdd/<plan-basename>/task-<N>-brief.md
++# Default OUTFILE: <repo-root>/.sdd/<plan-basename>/task-<N>-brief.md
+ # (per plan and per worktree; concurrent runs of the SAME plan in the same
+ # working tree share it). -C DIR runs as if started in DIR, as in sdd-workspace.
+ set -euo pipefail
+@@ -77,6 +77,10 @@ TASK_BRIEF_PLAN="$plan" awk -v n="$n" '
+       }
+     }
+   }
++  # agent-skills task lists put "## Checkpoint: ..." blocks between tasks. A
++  # checkpoint belongs to the controller, not to the task above it, so it
++  # ends the task being captured.
++  !infence && /^#+[ \t]+Checkpoint([ \t:]|$)/ { intask = 0 }
+   !infence && /^#+[ \t]+[^ \t]+[ \t]+[A-Za-z0-9.]*[0-9]/ && shaped < 5 { shaped_heading[++shaped] = $0 }
+   intask { print; found = 1 }
+   END {

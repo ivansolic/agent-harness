@@ -1,0 +1,10 @@
+{
+  "name": "agent-harness",
+  "version": "0.2.0",
+  "description": "A curated set of agent skills from mattpocock/skills, pstack and superpowers, built to run on top of addyosmani/agent-skills.",
+  "author": {
+    "name": "Ivan Šolić"
+  },
+  "license": "MIT",
+  "skills": "./skills"
+}

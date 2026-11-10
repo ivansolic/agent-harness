@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "agent-harness",
+  "description": "A curated set of agent skills from mattpocock/skills, pstack and superpowers, built to run on top of addyosmani/agent-skills.",
+  "owner": {
+    "name": "Ivan Šolić"
+  },
+  "plugins": [
+    {
+      "name": "agent-harness",
+      "version": "0.2.0",
+      "source": "./",
+      "description": "A curated set of agent skills from mattpocock/skills, pstack and superpowers, built to run on top of addyosmani/agent-skills.",
+      "license": "MIT"
+    }
+  ]
+}
